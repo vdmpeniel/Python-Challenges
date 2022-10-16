@@ -19,19 +19,29 @@ name = ''
 tts_type = ''
 
 
-def play_sound(sound):
-    mixer.init()
-    sound.seek(0)
-    mixer.music.load(sound, 'mp3')
-    mixer.music.play()
-    while mixer.music.get_busy():  # do while music to finish playing
-        print('Talking...', end='\r')
-    time.sleep(0.001)
-    mixer.stop()
+def play_sound(sound, volume=0.5):
+    try:
+        mixer.init()
+        mixer.music.set_volume(volume)
+        if isinstance(sound, str):
+            mixer.music.load(f'./basic_virtual_assistant/sounds/{sound}')
+        else:
+            sound.seek(0)
+            mixer.music.load(sound, 'mp3')
+
+        mixer.music.play()
+        while mixer.music.get_busy():  # do while music to finish playing
+            print('Talking...', end='\r')
+
+        print(' ', end='\r')
+        time.sleep(0.001)
+        mixer.stop()
+
+    except Exception as e:
+        print(f'An exception of type: {type(e)} occurred. Arguments: {e.args}')
 
 
 def google_text_to_speech(message):
-    print(f'Google\'s TTS talking...')
     tts = gTTS(text=message, lang='en')
     mp3_fp = BytesIO()
     tts.write_to_fp(mp3_fp)
@@ -54,7 +64,6 @@ def stop_speech_engine():
 def python_text_to_speech(message):
     global engine
     init_speech_engine()
-    print(f'Python\'s TTS talking...')
     engine.say(message)
     engine.runAndWait()
     stop_speech_engine()
@@ -67,23 +76,52 @@ def talk(message):
         google_text_to_speech(message)
 
 
-def take_command():
+def calibrate_recognizer():
+    try:
+        recognizer = sr.Recognizer()
+        # with sr.Microphone() as source:
+        #     print('\nCalibrating...')
+        #     recognizer.adjust_for_ambient_noise(source)
+        #     time.sleep(0.1)
+        #     print('Done.\n')
+        return recognizer
+    except sr.UnknownValueError:
+        print("Google Speech Recognition could not understand audio")
+
+    except sr.RequestError as e:
+        print("Could not request results from Google Speech Recognition service; {0}".format(e))
+    return None
+
+
+def listen_to_voice_command():
     global name
-    print('Listening...')
-    listener = sr.Recognizer()
+    # time.sleep(0.01)
+    recognizer = sr.Recognizer()
+    error_message = ''
     try:
         with sr.Microphone() as source:
-            voice = listener.listen(source)
-            command = listener.recognize_google(voice)
-
+            print('\nListening...')
+            audio = recognizer.listen(source)
+            command = recognizer.recognize_google(audio)
             command = command.lower()
+
             if name.lower() in command:
-                # play sound
-                command = command.replace(name, '')
+                play_sound('chime.mp3')
+                command = command.replace(name.lower(), '').rstrip(' ').lstrip(' ')
                 return command
+            print(f'- Name was not present in the heard utterance: {command}')
             return '...'
-    except:
-        return '...'
+
+    except sr.UnknownValueError:
+        error_message = ' (Error: Google Speech Recognition could not understand audio)'
+
+    except sr.RequestError as e:
+        error_message = f' (Error: Could not request results from Google Speech Recognition service; {e})'
+
+    except Exception as e:
+        error_message = f' (Error: Exception of type {e} occurred)'
+
+    return 'Silence' + error_message
 
 
 def contains_any(term, iterable):
@@ -99,27 +137,48 @@ def remove_all(term, iterable):
     return term
 
 
+question_starts = {
+    "what's",
+    'what is',
+    "who's",
+    'who is',
+    'what was',
+    'who was',
+    'who were',
+    'when is',
+    'when was'
+}
+
+
+def say(message):
+    print(f'- Assistant: {message}')
+    talk(message)
+
+
 def run_virtual_assistant():
     global name
-    talk(f'I am {name}, your virtual assistant')
-    talk('How can I help you?')
+    # recognizer = calibrate_recognizer()
+
+    say(f'I am {name}, your virtual assistant')
+    say('How can I help you?')
 
     command = ''
-    is_halt = False
-    while not is_halt:
-        command = take_command()
-
-        print(f'- User: {command}')
+    while True:
+        command = listen_to_voice_command()
         message = ''
-        if command == 'exit' or keyboard.KEY_DOWN:
-            message = 'Good bye!'
-            is_halt = True
+        print(f'- User: {command}')
 
-        elif command == '...':
+        if command == 'exit' or keyboard.is_pressed(' '):
+            break
+
+        elif contains_any(command, {'...', 'Silence (Error:'}):
             continue
 
         elif command == '':
             message = "I'm sorry, is there anything I may help you with?"
+
+        elif contains_any(command, {'hi', 'hello', 'howdy'}):
+            message = 'Hi. It is my pleasure to help you'
 
         elif 'play' in command:
             song = command.replace('play', '')
@@ -134,10 +193,10 @@ def run_virtual_assistant():
             time = datetime.datetime.now().strftime('%I:%M %p')
             message = f'Current time is: {time}'
 
-        elif contains_any(command, {"what's", 'what is', "who's", 'who is', 'what was', 'who was', 'who were'}):
-            subject = remove_all(command, {"what's", 'what is', "who's", 'who is', 'what was', 'who was', 'who were'})
+        elif contains_any(command, question_starts):
+            subject = remove_all(command, question_starts)
             try:
-                info = wikipedia.summary(subject, 2)
+                info = wikipedia.summary(subject, 1)
                 message = 'This is what I found in Wikipedia: ' + info
             except:
                 message = "I'm sorry, I couldn't find any results on that subject"
@@ -147,14 +206,14 @@ def run_virtual_assistant():
 
         else:
             message = "I didn't get that, sorry. Come again"
+        say(message)
 
-        print(f'- Assistant: {message} \n')
-        talk(message)
+    say('Good bye!')
 
 
 def main():
     global name, tts_type
-    name = 'Alexa'
+    name = 'alexa'
     tts_type = 'google'
     run_virtual_assistant()
 
